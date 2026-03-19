@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineChat IA</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-circle">CC</div>
+                <div class="logo-text">
+                    <span class="logo-title">CineChat</span>
+                    <span class="logo-subtitle">IA de Filmes</span>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <h1 class="page-title">Assistente de Cinema</h1>
+                </div>
+            </header>
+
+            <section class="chat-wrapper">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="chat-message assistant">
+                        <div class="message-avatar">🎬</div>
+                        <div class="message-content">
+                            <p>Olá! Qual filme ou gênero você quer explorar hoje?</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <div class="input-inner">
+                        <textarea id="user-input" rows="1" placeholder="Digite sua mensagem..."></textarea>
+                        <button class="btn-primary send-btn" id="send-btn">Enviar</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
