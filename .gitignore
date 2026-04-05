@@ -1,7 +1,40 @@
+# Segredos e ambiente — nunca versionar
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.Python
+.venv/
 venv/
 env/
-.vercel/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Node / frontend
 node_modules/
+frontend/dist/
+*.local
+
+# Ferramentas e IDE
+.vercel/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

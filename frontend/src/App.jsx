@@ -14,6 +14,8 @@ function App() {
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  /** Evita envio duplo (duplo clique / cartão + Enter) enquanto a requisição está ativa */
+  const sendInFlightRef = useRef(false);
 
   // Apply theme to body
   useEffect(() => {
@@ -86,7 +88,8 @@ function App() {
 
   const handleSend = async (overrideText) => {
     const textToSend = typeof overrideText === 'string' ? overrideText : inputText.trim();
-    if (!textToSend || isLoading) return;
+    if (!textToSend || isLoading || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
 
     let currentChatId = activeChatId;
     if (!currentChatId) {
@@ -96,71 +99,161 @@ function App() {
       setActiveChatId(currentChatId);
     }
 
-    // Add user message
-    setChats(prevChats => {
-      const newChats = prevChats.map(chat => {
-        if (chat.id === currentChatId) {
-          return {
-            ...chat,
-            messages: [...chat.messages, { text: textToSend, type: 'user' }]
-          };
-        }
-        return chat;
+    setInputText("");
+    setIsLoading(true);
+
+    // Uma única atualização: mensagem do usuário + placeholder da IA (evita duplicar o texto do usuário)
+    setChats((prevChats) => {
+      const newChats = prevChats.map((chat) => {
+        if (chat.id !== currentChatId) return chat;
+        return {
+          ...chat,
+          messages: [
+            ...chat.messages,
+            { text: textToSend, type: "user" },
+            { text: "", type: "assistant", streaming: true },
+          ],
+        };
       });
       localStorage.setItem("chat_history", JSON.stringify(newChats));
       return newChats;
     });
 
-    setInputText("");
-    setIsLoading(true);
-
-    // Call API
-    try {
-      const apiUrl = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
+    const apiUrl =
+      window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
         ? "http://127.0.0.1:5001/api/chat"
         : "/api/chat";
 
+    try {
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: textToSend, session_id: currentChatId }),
+        body: JSON.stringify({ message: textToSend, session_id: currentChatId, stream: true }),
       });
 
-      const data = await response.json();
+      const ct = response.headers.get("content-type") || "";
 
-      setChats(prevChats => {
-        const newChats = prevChats.map(chat => {
-          if (chat.id === currentChatId) {
-            let newTitle = chat.title;
-            if (chat.messages.length === 1 && chat.title === "Nova conversa") {
-              const words = textToSend.split(" ").slice(0, 4).join(" ");
-              newTitle = words + (textToSend.split(" ").length > 4 ? "..." : "");
-            }
-            if (response.ok) {
-              return { ...chat, title: newTitle, messages: [...chat.messages, { text: data.response, type: 'assistant' }] };
-            } else {
-              return { ...chat, title: newTitle, messages: [...chat.messages, { text: data.response || data.error || "Erro Desconhecido", type: 'assistant' }] };
-            }
+      if (!response.ok && !ct.includes("text/event-stream")) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.response || errData.error || `Erro ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error("Resposta sem corpo");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      const applySsePayload = (data) => {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        if (data.text) {
+          fullText += data.text;
+          setChats((prevChats) => {
+            const newChats = prevChats.map((chat) => {
+              if (chat.id !== currentChatId) return chat;
+              const msgs = chat.messages.map((m, idx) =>
+                idx === chat.messages.length - 1 && m.type === "assistant" && m.streaming
+                  ? { ...m, text: fullText }
+                  : m
+              );
+              return { ...chat, messages: msgs };
+            });
+            localStorage.setItem("chat_history", JSON.stringify(newChats));
+            return newChats;
+          });
+        }
+      };
+
+      const consumeCompleteSseBlocks = (raw) => {
+        const normalized = raw.replace(/\r\n/g, "\n");
+        const parts = normalized.split("\n\n");
+        const complete = parts.slice(0, -1);
+        const tail = parts[parts.length - 1] ?? "";
+        for (const block of complete) {
+          const line = block.trim();
+          if (!line.startsWith("data: ")) continue;
+          let data;
+          try {
+            data = JSON.parse(line.slice(6));
+          } catch {
+            continue;
           }
-          return chat;
+          applySsePayload(data);
+        }
+        return tail;
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = consumeCompleteSseBlocks(buffer);
+      }
+
+      // Último evento pode vir sem "\n\n" no fim do stream
+      if (buffer.trim()) {
+        const tail = buffer.replace(/\r\n/g, "\n").trim();
+        for (const line of tail.split("\n")) {
+          const t = line.trim();
+          if (!t.startsWith("data: ")) continue;
+          let data;
+          try {
+            data = JSON.parse(t.slice(6));
+          } catch {
+            continue;
+          }
+          applySsePayload(data);
+        }
+      }
+
+      setChats((prevChats) => {
+        const newChats = prevChats.map((chat) => {
+          if (chat.id !== currentChatId) return chat;
+          let newTitle = chat.title;
+          const userOnly = chat.messages.filter((m) => m.type === "user");
+          if (userOnly.length === 1 && chat.title === "Nova conversa") {
+            const words = textToSend.split(" ").slice(0, 4).join(" ");
+            newTitle = words + (textToSend.split(" ").length > 4 ? "..." : "");
+          }
+          const msgs = chat.messages.map((m, idx) =>
+            idx === chat.messages.length - 1 && m.type === "assistant"
+              ? { text: fullText || m.text || "Sem resposta.", type: "assistant" }
+              : m
+          );
+          return { ...chat, title: newTitle, messages: msgs };
         });
         localStorage.setItem("chat_history", JSON.stringify(newChats));
         return newChats;
       });
-
     } catch (error) {
-      setChats(prevChats => {
-        const newChats = prevChats.map(chat => {
-          if (chat.id === currentChatId) {
-            return { ...chat, messages: [...chat.messages, { text: "Erro de conexão. Verifique se o servidor está rodando.", type: 'assistant' }] };
-          }
-          return chat;
+      setChats((prevChats) => {
+        const newChats = prevChats.map((chat) => {
+          if (chat.id !== currentChatId) return chat;
+          const withoutStreaming = chat.messages.filter((m) => !(m.type === "assistant" && m.streaming));
+          return {
+            ...chat,
+            messages: [
+              ...withoutStreaming,
+              {
+                text:
+                  error.message ||
+                  "Erro de conexão. Verifique se o servidor está rodando.",
+                type: "assistant",
+              },
+            ],
+          };
         });
         localStorage.setItem("chat_history", JSON.stringify(newChats));
         return newChats;
       });
     } finally {
       setIsLoading(false);
+      sendInFlightRef.current = false;
     }
   };
 
@@ -275,7 +368,11 @@ function App() {
             <div className="chat-messages">
               {activeChat && activeChat.messages.map((msg, idx) => {
                 const isUser = msg.type === 'user';
-                const contentHtml = isUser ? `<p>${msg.text}</p>` : DOMPurify.sanitize(marked.parse(msg.text));
+                const assistantBody =
+                  msg.streaming && !msg.text?.trim()
+                    ? "<p class=\"streaming-hint\">Gerando 20 recomendações…</p>"
+                    : DOMPurify.sanitize(marked.parse(msg.text || ""));
+                const contentHtml = isUser ? `<p>${msg.text}</p>` : assistantBody;
                 return (
                   <div key={idx} className={`message-row ${msg.type}`}>
                     <div className={`avatar ${isUser ? 'user-avatar' : 'ai-avatar'}`}>
@@ -291,7 +388,7 @@ function App() {
                 );
               })}
               
-              {isLoading && (
+              {isLoading && activeChat && !activeChat.messages.some((m) => m.streaming) && (
                 <div className="message-row assistant temp-loading">
                   <div className="avatar ai-avatar">
                     <span className="material-symbols-rounded" style={{fontSize: '20px'}}>local_florist</span>

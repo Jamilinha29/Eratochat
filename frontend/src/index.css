@@ -570,6 +570,12 @@ body {
   margin-bottom: 0;
 }
 
+.message-row.assistant .message-text .streaming-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .message-row.assistant .message-text h1,
 .message-row.assistant .message-text h2,
 .message-row.assistant .message-text h3 {
