@@ -30,6 +30,7 @@ frontend/dist/
 
 # Ferramentas e IDE
 .vercel/
+.vscode/
 .idea/
 *.swp
 .DS_Store

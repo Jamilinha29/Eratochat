@@ -166,19 +166,25 @@ body {
   padding: 16px 20px;
 }
 
-.logo-circle {
+.logo {
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: -4px; /* Approximates spacing to text */
 }
 
-.logo-circle span {
+.logo span {
   font-size: 32px;
   color: var(--text-blue);
 }
 
-.logo-title {
+.logo-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.logo-titulo {
   font-family: 'Montserrat', sans-serif;
   font-size: 22px;
   font-weight: 300;
@@ -357,7 +363,7 @@ body {
   border-top: 1px solid var(--border-color);
 }
 
-.btn-settings {
+.btn-config {
   width: 100%;
   display: flex;
   align-items: center;
@@ -372,12 +378,12 @@ body {
   transition: all 0.2s;
 }
 
-.btn-settings:hover {
+.btn-config:hover {
   color: var(--text-main);
   background-color: var(--bg-sidebar-hover);
 }
 
-.btn-settings span {
+.btn-config span {
   font-size: 20px;
 }
 
@@ -404,7 +410,7 @@ body {
 }
 
 /* Tela de Boas Vindas */
-.welcome-screen {
+.tela-boas-vindas {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -417,26 +423,32 @@ body {
   text-align: center;
 }
 
-.welcome-icon {
+.boas-vindas-icone {
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 24px;
 }
 
-.welcome-icon span {
+.boas-vindas-icone span {
   font-size: 72px;
   color: var(--text-blue);
 }
 
-.welcome-title {
+.boas-vindas-logo {
+  width: 86px;
+  height: 86px;
+  object-fit: contain;
+}
+
+.boas-vindas-titulo {
   font-size: 32px;
   font-weight: 700;
   margin-bottom: 16px;
   color: var(--text-main);
 }
 
-.welcome-subtitle {
+.boas-vindas-subtitulo {
   font-size: 16px;
   color: var(--text-muted);
   margin-bottom: 48px;
@@ -532,6 +544,12 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   color: var(--text-blue);
+}
+
+.avatar-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
 }
 
 .message-bubble {
@@ -681,11 +699,6 @@ body {
   cursor: not-allowed;
 }
 
-.placeholder-chat-item {
-  cursor: pointer;
-  opacity: 0.95;
-}
-
 .input-area {
   width: 100%;
   max-width: 768px;
@@ -757,7 +770,7 @@ body {
 }
 
 /* MODAL CONFIGURAÇÕES */
-.modal-overlay {
+.config-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background-color: rgba(0,0,0,0.6);
@@ -772,12 +785,12 @@ body {
   transition: opacity 0.2s;
 }
 
-.modal-overlay.show {
+.config-overlay.show {
   opacity: 1;
   pointer-events: auto;
 }
 
-.modal {
+.config-modal {
   background-color: var(--bg-modal);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -791,11 +804,11 @@ body {
   overflow: hidden;
 }
 
-.modal-overlay.show .modal {
+.config-overlay.show .config-modal {
   transform: translateY(0);
 }
 
-.modal-header {
+.config-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -803,13 +816,13 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
-.modal-header h2 {
+.config-header h2 {
   font-size: 16px;
   font-weight: 600;
   color: var(--settings-title-color);
 }
 
-.btn-close-modal {
+.btn-fechar-config {
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -817,11 +830,11 @@ body {
   display: flex;
 }
 
-.btn-close-modal:hover {
+.btn-fechar-config:hover {
   color: var(--text-main);
 }
 
-.modal-body {
+.config-body {
   padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;
@@ -829,13 +842,13 @@ body {
   overflow-y: auto;
 }
 
-.settings-section {
+.config-secao {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.settings-label {
+.config-label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -844,18 +857,18 @@ body {
   color: var(--settings-section-color);
 }
 
-.settings-label span {
+.config-label span {
   font-size: 16px;
 }
 
 /* Theme Cards */
-.theme-options {
+.tema-opcoes {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
-.theme-card {
+.tema-card {
   background-color: var(--bg-card);
   border: 2px solid transparent;
   border-radius: var(--radius-md);
@@ -869,16 +882,16 @@ body {
   transition: all 0.2s;
 }
 
-.theme-card:hover {
+.tema-card:hover {
   background-color: var(--bg-sidebar-hover);
 }
 
-.theme-card.active {
+.tema-card.active {
   border-color: var(--accent-color);
   background-color: rgba(59, 130, 246, 0.1);
 }
 
-.theme-preview {
+.tema-preview {
   width: 100%;
   height: 36px;
   border-radius: 6px;
@@ -887,18 +900,18 @@ body {
   gap: 4px;
 }
 
-.theme-preview div:first-child {
+.tema-preview div:first-child {
   width: 30%;
   height: 100%;
   border-radius: 4px;
 }
-.theme-preview div:last-child {
+.tema-preview div:last-child {
   flex: 1;
   height: 100%;
   border-radius: 4px;
 }
 
-.theme-card span:not(.check-icon) {
+.tema-card span:not(.check-icon) {
   font-size: 12px;
   font-weight: 500;
   text-align: center;
@@ -917,7 +930,7 @@ body {
   transition: all 0.2s;
 }
 
-.theme-card.active .check-icon {
+.tema-card.active .check-icon {
   opacity: 1;
   transform: scale(1);
 }
@@ -928,7 +941,7 @@ body {
   gap: 8px;
 }
 
-.settings-input {
+.config-input {
   flex: 1;
   background-color: var(--bg-card);
   border: 1px solid var(--border-input);
@@ -939,7 +952,7 @@ body {
   outline: none;
 }
 
-.settings-input:focus {
+.config-input:focus {
   border-color: var(--accent-color);
 }
 
@@ -958,22 +971,22 @@ body {
   background-color: var(--accent-color-hover);
 }
 
-.settings-hint {
+.config-hint {
   font-size: 11px;
   color: var(--text-muted);
 }
 
 /* Zona de Perigo */
-.delete-section {
+.excluir-secao {
   border-top: 1px solid var(--border-color);
   padding-top: 12px;
 }
 
-.delete-label {
+.excluir-label {
   color: var(--danger-color);
 }
 
-.delete-warning {
+.excluir-alerta {
   color: var(--danger-warning-color);
   font-size: 12px;
   line-height: 1.35;
@@ -1002,26 +1015,26 @@ body {
 }
 
 @media (max-width: 768px) {
-  .modal-overlay {
+  .config-overlay {
     padding: 12px;
   }
 
-  .modal {
+  .config-modal {
     width: min(96vw, 560px);
     max-height: calc(100vh - 24px);
     border-radius: 14px;
   }
 
-  .modal-header {
+  .config-header {
     padding: 16px 18px;
   }
 
-  .modal-body {
+  .config-body {
     padding: 18px;
     gap: 22px;
   }
 
-  .theme-options {
+  .tema-opcoes {
     grid-template-columns: 1fr;
   }
 }

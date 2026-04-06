@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
 function App() {
+  const logo = "/logo.png";
   const QUICK_PROMPT_OPTIONS = [
     { label: "5 livros de comédia", prompt: "Me dê 5 recomendações de livros de comédia." },
     { label: "10 séries de suspense", prompt: "Quero 10 recomendações de séries de suspense." },
@@ -21,11 +22,18 @@ function App() {
     }
   };
 
-  const [agentName, setAgentName] = useState(() => localStorage.getItem("agent_name") || "Nova AI");
-  const [currentTheme, setCurrentTheme] = useState(() => localStorage.getItem("app_theme") || "theme-azul-marinho");
+  const [agentName, setAgentName] = useState(() => {
+    const saved = localStorage.getItem("agent_name");
+    // Migra valor legado para o novo padrão da marca.
+    if (!saved || !saved.trim() || saved.trim() === "Nova AI") {
+      return "EratoChat";
+    }
+    return saved;
+  });
+  const [temaAtual, setTemaAtual] = useState(() => localStorage.getItem("app_theme") || "theme-azul-marinho");
   const [chats, setChats] = useState(parseChatHistory);
   const [activeChatId, setActiveChatId] = useState(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingChatId, setLoadingChatId] = useState(null);
@@ -39,9 +47,21 @@ function App() {
 
   // Apply theme to body
   useEffect(() => {
-    document.body.className = currentTheme;
-    localStorage.setItem("app_theme", currentTheme);
-  }, [currentTheme]);
+    document.body.className = temaAtual;
+    localStorage.setItem("app_theme", temaAtual);
+  }, [temaAtual]);
+
+  // Garante que a aba do navegador use a mesma logo da interface.
+  useEffect(() => {
+    let favicon = document.querySelector("link[rel='icon']");
+    if (!favicon) {
+      favicon = document.createElement("link");
+      favicon.setAttribute("rel", "icon");
+      document.head.appendChild(favicon);
+    }
+    favicon.setAttribute("type", "image/png");
+    favicon.setAttribute("href", logo);
+  }, []);
 
   // Set initial active chat if chats exist
   useEffect(() => {
@@ -102,7 +122,7 @@ function App() {
       setChats([]);
       setActiveChatId(null);
       localStorage.setItem("chat_history", JSON.stringify([]));
-      setIsSettingsOpen(false);
+      setIsConfigOpen(false);
     }
   };
 
@@ -402,10 +422,10 @@ function App() {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="logo-circle">
-            <span className="material-symbols-rounded">local_florist</span>
+          <div className="logo">
+            <img src={logo} alt="Logo EratoChat" className="logo-img" />
           </div>
-          <span className="logo-title">EratoChat</span>
+          <span className="logo-titulo">EratoChat</span>
         </div>
 
         <div className="sidebar-actions">
@@ -420,14 +440,6 @@ function App() {
             {chats.length === 0 && (
               <>
                 <p className="empty-state-text">Nenhuma conversa ainda. Comece uma nova!</p>
-                <ul className="chat-list">
-                  <li className="chat-item active placeholder-chat-item" onClick={createNewChat}>
-                    <div className="chat-item-text">
-                      <span className="material-symbols-rounded" style={{fontSize: '18px'}}>chat_bubble</span>
-                      Nova conversa
-                    </div>
-                  </li>
-                </ul>
               </>
             )}
             <ul className="chat-list">
@@ -465,7 +477,7 @@ function App() {
         </div>
 
         <div className="sidebar-footer">
-          <button className="btn-settings" onClick={() => setIsSettingsOpen(true)}>
+          <button className="btn-config" onClick={() => setIsConfigOpen(true)}>
             <span className="material-symbols-rounded">settings</span>
             Configurações
           </button>
@@ -481,12 +493,12 @@ function App() {
         )}
 
         {showWelcome ? (
-          <section className="welcome-screen">
-            <div className="welcome-icon">
-              <span className="material-symbols-rounded">local_florist</span>
+          <section className="tela-boas-vindas">
+            <div className="boas-vindas-icone">
+              <img src={logo} alt="Logo EratoChat" className="boas-vindas-logo" />
             </div>
-            <h2 className="welcome-title">O que quer assistir ou ler?</h2>
-            <p className="welcome-subtitle">
+            <h2 className="boas-vindas-titulo">O que quer assistir ou ler?</h2>
+            <p className="boas-vindas-subtitulo">
               Sou <span>{agentName}</span>, especialista em recomendar filmes, séries e livros de todos os gêneros e épocas.
             </p>
             
@@ -518,9 +530,11 @@ function App() {
                 return (
                   <div key={idx} className={`message-row ${msg.type}`}>
                     <div className={`avatar ${isUser ? 'user-avatar' : 'ai-avatar'}`}>
-                      <span className="material-symbols-rounded" style={{fontSize: '20px'}}>
-                        {isUser ? 'person' : 'local_florist'}
-                      </span>
+                      {isUser ? (
+                        <span className="material-symbols-rounded" style={{fontSize: '20px'}}>person</span>
+                      ) : (
+                        <img src={logo} alt="Logo EratoChat" className="avatar-logo" />
+                      )}
                     </div>
                     <div className="message-bubble">
                       <span className="author-name">{isUser ? 'Você' : agentName}</span>
@@ -537,7 +551,7 @@ function App() {
               {isLoading && activeChat && loadingChatId === activeChat.id && !activeChat.messages.some((m) => m.streaming) && (
                 <div className="message-row assistant temp-loading">
                   <div className="avatar ai-avatar">
-                    <span className="material-symbols-rounded" style={{fontSize: '20px'}}>local_florist</span>
+                    <img src={logo} alt="Logo EratoChat" className="avatar-logo" />
                   </div>
                   <div className="message-bubble">
                     <span className="author-name">{agentName}</span>
@@ -576,46 +590,46 @@ function App() {
       </main>
 
       {/* Settings Modal */}
-      <div className={`modal-overlay ${isSettingsOpen ? 'show' : ''}`} onClick={() => setIsSettingsOpen(false)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-header">
+      <div className={`config-overlay ${isConfigOpen ? 'show' : ''}`} onClick={() => setIsConfigOpen(false)}>
+        <div className="config-modal" onClick={e => e.stopPropagation()}>
+          <div className="config-header">
             <h2>Configurações</h2>
-            <button className="btn-close-modal" onClick={() => setIsSettingsOpen(false)}>
+            <button className="btn-fechar-config" onClick={() => setIsConfigOpen(false)}>
               <span className="material-symbols-rounded">close</span>
             </button>
           </div>
-          <div className="modal-body">
-            <div className="settings-section">
-              <label className="settings-label">
+          <div className="config-body">
+            <div className="config-secao">
+              <label className="config-label">
                 <span className="material-symbols-rounded">palette</span> Tema da Interface
               </label>
-              <div className="theme-options">
-                <div className={`theme-card ${currentTheme === 'theme-azul-marinho' ? 'active' : ''}`} onClick={() => setCurrentTheme('theme-azul-marinho')}>
-                  <div className="theme-preview" style={{background: '#0a1128'}}>
+              <div className="tema-opcoes">
+                <div className={`tema-card ${temaAtual === 'theme-azul-marinho' ? 'active' : ''}`} onClick={() => setTemaAtual('theme-azul-marinho')}>
+                  <div className="tema-preview" style={{background: '#0a1128'}}>
                     <div style={{background: '#1e293b'}}></div>
                     <div style={{background: '#3b82f6'}}></div>
                   </div>
                   <span>Azul Marinho</span>
                   <span className="material-symbols-rounded check-icon">check_circle</span>
                 </div>
-                <div className={`theme-card ${currentTheme === 'theme-preto-profundo' ? 'active' : ''}`} onClick={() => setCurrentTheme('theme-preto-profundo')}>
-                  <div className="theme-preview" style={{background: '#000000'}}>
+                <div className={`tema-card ${temaAtual === 'theme-preto-profundo' ? 'active' : ''}`} onClick={() => setTemaAtual('theme-preto-profundo')}>
+                  <div className="tema-preview" style={{background: '#000000'}}>
                     <div style={{background: '#111111'}}></div>
                     <div style={{background: '#333333'}}></div>
                   </div>
                   <span>Preto Profundo</span>
                   <span className="material-symbols-rounded check-icon">check_circle</span>
                 </div>
-                <div className={`theme-card ${currentTheme === 'theme-branco-adaptativo' ? 'active' : ''}`} onClick={() => setCurrentTheme('theme-branco-adaptativo')}>
-                  <div className="theme-preview" style={{background: '#ffffff', border: '1px solid #e2e8f0'}}>
+                <div className={`tema-card ${temaAtual === 'theme-branco-adaptativo' ? 'active' : ''}`} onClick={() => setTemaAtual('theme-branco-adaptativo')}>
+                  <div className="tema-preview" style={{background: '#ffffff', border: '1px solid #e2e8f0'}}>
                     <div style={{background: '#f1f5f9'}}></div>
                     <div style={{background: '#0f172a'}}></div>
                   </div>
                   <span>Branco Suave</span>
                   <span className="material-symbols-rounded check-icon">check_circle</span>
                 </div>
-                <div className={`theme-card ${currentTheme === 'theme-ceu-estrelado' ? 'active' : ''}`} onClick={() => setCurrentTheme('theme-ceu-estrelado')}>
-                  <div className="theme-preview" style={{background: '#090616', border: '1px solid rgba(139, 92, 246, 0.3)'}}>
+                <div className={`tema-card ${temaAtual === 'theme-ceu-estrelado' ? 'active' : ''}`} onClick={() => setTemaAtual('theme-ceu-estrelado')}>
+                  <div className="tema-preview" style={{background: '#090616', border: '1px solid rgba(139, 92, 246, 0.3)'}}>
                     <div style={{background: '#110d24'}}></div>
                     <div style={{background: '#8b5cf6'}}></div>
                   </div>
@@ -625,8 +639,8 @@ function App() {
               </div>
             </div>
 
-            <div className="settings-section">
-              <label className="settings-label">
+            <div className="config-secao">
+              <label className="config-label">
                 <span className="material-symbols-rounded">smart_toy</span> Nome do Agente
               </label>
               <div className="input-group">
@@ -637,17 +651,17 @@ function App() {
                     setAgentName(e.target.value);
                     localStorage.setItem("agent_name", e.target.value);
                   }}
-                  className="settings-input" 
+                  className="config-input" 
                 />
               </div>
-              <p className="settings-hint">Este nome aparecerá na interface e nas respostas da IA.</p>
+              <p className="config-hint">Este nome aparecerá na interface e nas respostas da IA.</p>
             </div>
 
-            <div className="settings-section delete-section">
-              <label className="settings-label delete-label">
+            <div className="config-secao excluir-secao">
+              <label className="config-label excluir-label">
                 <span className="material-symbols-rounded">delete</span> Apagar Dados
               </label>
-              <p className="settings-hint delete-warning">Atenção: esta ação apagará todos os chats já feitos e não poderá ser desfeita.</p>
+              <p className="config-hint excluir-alerta">Atenção: esta ação apagará todos os chats já feitos e não poderá ser desfeita.</p>
               <button className="btn-danger" onClick={deleteAllChats}>
                 <span className="material-symbols-rounded">delete</span> Apagar todas as conversas
               </button>
