@@ -6,13 +6,22 @@ Assistente de conversação focado em **recomendações de filmes, séries e liv
 
 O EratoChat permite que o usuário descreva o que gosta de assistir ou ler e receba sugestões organizadas em Markdown (categorias, sinopses curtas e “por que você vai gostar”). O backend aplica um *system prompt* fixo para manter o foco em entretenimento e o frontend oferece temas, histórico de conversas no navegador e interface em React.
 
+## Como Funciona Hoje
+
+- O endpoint `/api/chat` usa streaming (SSE) para resposta progressiva no chat.
+- Se o usuário informar quantidade (`5 recomendações`, `me dê 8`, `10 séries`), a API usa exatamente esse número.
+- Sem quantidade explícita, o padrão é **20** recomendações.
+- O backend aplica limite final em `N` itens para evitar respostas acima do solicitado.
+- Quando a cota Gemini é excedida, a API responde com mensagem clara e status `429` (no modo não-stream).
+- Os balões de opções rápidas aparecem após iniciar conversa (não aparecem na tela inicial).
+
 ## Stack principal
 
 | Camada | Tecnologia |
 |--------|------------|
 | Frontend | React 18, Vite 5, `marked` + DOMPurify (Markdown seguro) |
 | Backend | Python 3, Flask, Flask-CORS, `google-generativeai`, `python-dotenv` |
-| IA | Google Gemini 1.5 Flash |
+| IA | Google Gemini (padrão: `gemini-3-flash`) |
 | Testes | pytest (API), script opcional k6 (carga) |
 | Deploy | Vercel (`vercel.json` + build estático do frontend) |
 
@@ -55,8 +64,9 @@ O `.gitignore` ignora `.env`, arquivos `.env.*` (exceto `.env.example`), chaves 
 ## Segurança
 
 - **Chave Gemini**: só no servidor / variáveis de ambiente (Vercel: *Settings → Environment Variables*). O frontend **não** embute chaves; só chama a sua API.
-- **CORS**: por padrão aceita `localhost` / `127.0.0.1` nas portas do app e do Vite. Em produção, defina `CORS_ORIGINS` no `.env` com a URL do seu site (várias URLs separadas por vírgula).
+- **CORS**: por padrão aceita `localhost` / `127.0.0.1` nas portas do app e do Vite. Em produção, defina `CORS_ORIGINS` no `.env` com as URLs **HTTPS** do seu domínio (várias URLs separadas por vírgula).
 - **Erros**: em produção o backend não expõe detalhes internos da exceção; com `FLASK_DEBUG=1` os detalhes aparecem para depuração local.
+- **Cota Gemini**: quando a cota é excedida, o backend responde com mensagem clara orientando a tentar novamente ou ajustar plano/cota.
 - **Cabeçalhos HTTP**: `X-Content-Type-Options`, `X-Frame-Options` e `Referrer-Policy` são aplicados nas respostas.
 - **Markdown**: o React sanitiza o HTML com DOMPurify antes de exibir respostas da IA.
 
@@ -127,8 +137,17 @@ Na raiz do projeto, com o build do frontend já feito e o `.env` configurado:
 python backend/app.py
 ```
 
-- API: `POST http://127.0.0.1:5001/api/chat` (JSON: `message`, `session_id`)
+- API: `POST http://127.0.0.1:5001/api/chat` (JSON: `message`, opcional `stream: true`)
 - Interface: abra no navegador `http://127.0.0.1:5001/`
+
+Exemplo de payload:
+
+```json
+{
+  "message": "Me recomende 5 livros de fantasia para iniciantes",
+  "stream": true
+}
+```
 
 **Desenvolvimento só do frontend** (hot reload; a API continua no Flask na porta 5001):
 
@@ -144,6 +163,11 @@ O app detecta `localhost` e envia requisições para `http://127.0.0.1:5001/api/
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
 | `GEMINI_API_KEY` | Sim | Chave da API Gemini |
+| `GEMINI_MODEL` | Não | Modelo Gemini (padrão: `gemini-3-flash`) |
+| `MAX_MESSAGE_CHARS` | Não | Limite de caracteres por mensagem (padrão: `1200`) |
+| `RATE_LIMIT_MAX_REQUESTS` | Não | Requisições por janela por IP (padrão: `25`) |
+| `RATE_LIMIT_WINDOW_SECONDS` | Não | Janela do rate limit em segundos (padrão: `60`) |
+| `APP_AUTH_TOKEN` | Não | Se definido, exige `Authorization: Bearer <token>` ou `X-App-Token` |
 
 | Serviço | Porta padrão |
 |---------|----------------|
@@ -156,5 +180,4 @@ O workflow em `.github/workflows/main.yml` instala dependências com `requiremen
 ## Deploy (Vercel)
 
 O projeto inclui `vercel.json` para build do frontend e função Python. Configure o segredo **`GEMINI_API_KEY`** nas variáveis de ambiente do projeto na Vercel após conectar o repositório.
-
 

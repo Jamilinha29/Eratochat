@@ -27,10 +27,10 @@ export default function () {
   // Endereço local ou de produção
   const url = 'http://127.0.0.1:5001/api/chat';
   
-  // Payload simulando o frontend (com um session_id único por Virtual User do k6)
+  // Payload simulando o frontend em modo streaming
   const payload = JSON.stringify({
     message: 'Olá, me recomende uma série de ficção curtinha!',
-    session_id: `k6-teste-usuario-${__VU}`
+    stream: true
   });
 
   const params = {
@@ -45,13 +45,8 @@ export default function () {
   // Verifica o resultado
   check(res, {
     'status é 200 (Sucesso)': (r) => r.status === 200,
-    'resposta possui a propriedade "response"': (r) => {
-        try {
-            return r.json().hasOwnProperty('response');
-        } catch(e) {
-            return false;
-        }
-    },
+    'resposta é SSE': (r) => (r.headers['Content-Type'] || '').includes('text/event-stream'),
+    'resposta contém eventos': (r) => r.body && r.body.includes('data: '),
   });
 
   // Pausa entre os envios para simular um usuário humano lendo a resposta
