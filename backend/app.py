@@ -1,7 +1,10 @@
 import json
 import os
+from pathlib import Path
 import re
 import time
+import urllib.error
+import urllib.request
 from collections import defaultdict, deque
 
 import google.generativeai as genai
@@ -10,7 +13,17 @@ from dotenv import find_dotenv, load_dotenv
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
 
+project_root = Path(__file__).resolve().parents[1]
+env_path = project_root / ".env"
+env_example_path = project_root / ".env.example"
+
 load_dotenv(find_dotenv())
+
+if not env_path.exists() and env_example_path.exists():
+    print("[setup] Arquivo .env nao encontrado.")
+    print("[setup] Copie .env.example para .env e preencha as chaves obrigatorias.")
+    print("[setup] Windows CMD: copy .env.example .env")
+    print("[setup] Linux/macOS: cp .env.example .env")
 
 api_key = os.getenv("GEMINI_API_KEY", "").strip()
 gemini_model_name = (os.getenv("GEMINI_MODEL") or "gemini-3-flash").strip()
@@ -18,10 +31,14 @@ app_auth_token = os.getenv("APP_AUTH_TOKEN", "").strip()
 max_message_chars = int(os.getenv("MAX_MESSAGE_CHARS", "1200"))
 rate_limit_max_requests = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "25"))
 rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+supabase_url = os.getenv("SUPABASE_URL", "").strip()
+supabase_publishable_key = (os.getenv("SUPABASE_PUBLISHABLE_KEY") or os.getenv("SUPABASE_KEY") or "").strip()
+supabase_table = (os.getenv("SUPABASE_METRICS_TABLE") or "api_request_metrics").strip()
 
 if os.getenv("FLASK_DEBUG") == "1":
     print("GEMINI_API_KEY configurada:", bool(api_key))
     print("GEMINI_MODEL:", gemini_model_name)
+    print("SUPABASE habilitado:", bool(supabase_url and supabase_publishable_key))
 
 app = Flask(__name__, static_folder="../frontend/dist", static_url_path="/")
 
@@ -195,6 +212,52 @@ def _is_authorized():
     return bearer == app_auth_token or header_token == app_auth_token
 
 
+def _safe_text(value, max_len=240):
+    text = str(value or "").strip()
+    return text[:max_len]
+
+
+def _log_metric(status_code, elapsed_ms, message, is_stream=False, error_code="", error_message=""):
+    """
+    Envia métricas da requisição para o Supabase via REST (opcional).
+    Se não estiver configurado ou falhar, não interrompe o fluxo da API.
+    """
+    if not supabase_url or not supabase_publishable_key:
+        return
+
+    payload = {
+        "endpoint": "/api/chat",
+        "status_code": int(status_code),
+        "response_time_ms": int(max(0, elapsed_ms)),
+        "message_length": len(message or ""),
+        "is_stream": bool(is_stream),
+        "error_code": _safe_text(error_code, 80),
+        "error_message": _safe_text(error_message, 240),
+        "client_ip": _safe_text(_client_ip(), 64),
+    }
+
+    body = json.dumps(payload).encode("utf-8")
+    table = supabase_table or "api_request_metrics"
+    endpoint = f"{supabase_url}/rest/v1/{table}"
+    req = urllib.request.Request(
+        endpoint,
+        data=body,
+        method="POST",
+        headers={
+            "apikey": supabase_publishable_key,
+            "Authorization": f"Bearer {supabase_publishable_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2):
+            pass
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+        # Falha de telemetria não deve quebrar o endpoint principal.
+        return
+
+
 @app.after_request
 def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -215,11 +278,18 @@ def security_headers(response):
 
 @app.route("/api/chat", methods=["POST"])
 def chat_agente():
+    started_at = time.perf_counter()
+
+    def elapsed_ms():
+        return int((time.perf_counter() - started_at) * 1000)
+
     if not _is_authorized():
+        _log_metric(401, elapsed_ms(), "", is_stream=False, error_code="unauthorized", error_message="Nao autorizado")
         return jsonify({"error": "Não autorizado"}), 401
 
     rate_limited, retry_after = _check_rate_limit(_client_ip())
     if rate_limited:
+        _log_metric(429, elapsed_ms(), "", is_stream=False, error_code="rate_limit", error_message="Muitas requisições")
         return (
             jsonify(
                 {
@@ -236,14 +306,16 @@ def chat_agente():
     use_stream = bool(dados.get("stream"))
 
     if not msg_usuario:
+        _log_metric(400, elapsed_ms(), msg_usuario, is_stream=use_stream, error_code="missing_message", error_message="Mensagem não fornecida")
         return jsonify({"error": "Mensagem não fornecida"}), 400
     if len(msg_usuario) > max_message_chars:
+        _log_metric(413, elapsed_ms(), msg_usuario, is_stream=use_stream, error_code="message_too_long", error_message="Mensagem muito longa")
         return jsonify({"error": f"Mensagem muito longa. Limite: {max_message_chars} caracteres."}), 413
     if model is None:
+        _log_metric(503, elapsed_ms(), msg_usuario, is_stream=use_stream, error_code="model_unavailable", error_message="Servico de IA nao configurado")
         return jsonify({"error": "Serviço de IA não configurado. Defina GEMINI_API_KEY no ambiente."}), 503
 
     if use_stream:
-
         def sse_chunks():
             try:
                 response = model.generate_content(
@@ -253,10 +325,13 @@ def chat_agente():
                 final_text = _enforce_recommendation_count(response.text or "", requested_count)
                 for delta in _chunk_for_sse(final_text):
                     yield f"data: {json.dumps({'text': delta}, ensure_ascii=False)}\n\n"
+                _log_metric(200, elapsed_ms(), msg_usuario, is_stream=True)
                 yield f"data: {json.dumps({'done': True})}\n\n"
             except google_exceptions.ResourceExhausted:
+                _log_metric(429, elapsed_ms(), msg_usuario, is_stream=True, error_code="quota_exceeded", error_message="Cota Gemini")
                 yield f"data: {json.dumps({'error': _quota_error_message()})}\n\n"
             except Exception as e:
+                _log_metric(500, elapsed_ms(), msg_usuario, is_stream=True, error_code="stream_exception", error_message=str(e))
                 yield f"data: {json.dumps({'error': _expose_internal_error(e)})}\n\n"
 
         return Response(
@@ -268,11 +343,14 @@ def chat_agente():
     try:
         response = model.generate_content(_build_prompt_for_request(msg_usuario), stream=False)
         final_text = _enforce_recommendation_count(response.text or "", requested_count)
+        _log_metric(200, elapsed_ms(), msg_usuario, is_stream=False)
         return jsonify({"response": final_text})
     except google_exceptions.ResourceExhausted:
+        _log_metric(429, elapsed_ms(), msg_usuario, is_stream=False, error_code="quota_exceeded", error_message="Cota Gemini")
         return jsonify({"error": _quota_error_message()}), 429
     except Exception as e:
         detail = _expose_internal_error(e)
+        _log_metric(500, elapsed_ms(), msg_usuario, is_stream=False, error_code="internal_exception", error_message=str(e))
         return jsonify({"response": f"O projetor parou! (Erro: {detail})"}), 500
 
 

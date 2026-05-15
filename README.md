@@ -1,105 +1,97 @@
 # EratoChat
 
-Assistente de conversação focado em **recomendações de filmes, séries e livros**, usando a API do Google Gemini. O nome **EratoChat** identifica o produto; o nome do agente de IA é configurável nas opções da interface.
+Plataforma de recomendação inteligente para **filmes, séries e livros** com interface web e backend em Flask integrado ao Google Gemini.
 
-## Objetivo
+## Apresentação e Contexto
 
-O EratoChat permite que o usuário descreva o que gosta de assistir ou ler e receba sugestões organizadas em Markdown (categorias, sinopses curtas e “por que você vai gostar”). O backend aplica um *system prompt* fixo para manter o foco em entretenimento e o frontend oferece temas, histórico de conversas no navegador e interface em React.
+Com o volume crescente de opções em streaming e leitura, usuários enfrentam sobrecarga de escolha e baixa personalização. O EratoChat foi criado para reduzir esse problema, transformando pedidos em linguagem natural (ex.: "quero algo parecido com Stranger Things") em recomendações organizadas, explicadas e relevantes.
 
-## Como Funciona Hoje
+### O que o projeto entrega
 
-- O endpoint `/api/chat` usa streaming (SSE) para resposta progressiva no chat.
-- Se o usuário informar quantidade (`5 recomendações`, `me dê 8`, `10 séries`), a API usa exatamente esse número.
-- Sem quantidade explícita, o padrão é **20** recomendações.
-- O backend aplica limite final em `N` itens para evitar respostas acima do solicitado.
-- Quando a cota Gemini é excedida, a API responde com mensagem clara e status `429` (no modo não-stream).
-- Os balões de opções rápidas aparecem após iniciar conversa (não aparecem na tela inicial).
+- Interpretação de pedidos textuais com IA generativa.
+- Recomendações estruturadas por tipo de obra.
+- Controle de quantidade solicitada pelo usuário.
+- Resposta em formato Markdown com sinopse e justificativa.
+- Coleta de métricas reais de API (tempo e erro) no Supabase.
+- Módulo de classificação supervisionada para análise de tipo de pedido (`filme`, `serie`, `livro`, `misto`).
 
-## Stack principal
+## Arquitetura e Tecnologias
 
-| Camada | Tecnologia |
-|--------|------------|
-| Frontend | React 18, Vite 5, `marked` + DOMPurify (Markdown seguro) |
-| Backend | Python 3, Flask, Flask-CORS, `google-generativeai`, `python-dotenv` |
-| IA | Google Gemini (padrão: `gemini-3-flash`) |
-| Testes | pytest (API), script opcional k6 (carga) |
-| Deploy | Vercel (`vercel.json` + build estático do frontend) |
+| Camada | Tecnologias |
+|---|---|
+| Frontend | React 18, Vite, `marked`, DOMPurify |
+| Backend | Python, Flask, Flask-CORS, `google-generativeai`, `python-dotenv` |
+| IA | Google Gemini (`gemini-3-flash`) |
+| Métricas | Supabase (REST + tabela `api_request_metrics`) |
+| ML complementar | scikit-learn, joblib, python-docx |
+| Deploy | Vercel (`vercel.json`) |
 
-## Pré-requisitos
+## Estrutura do Projeto
 
-- **Python** 3.9 ou superior (recomendado 3.10+)
-- **Node.js** 18+ (para instalar dependências e build do frontend)
-- Conta Google com **chave de API** do [Google AI Studio](https://aistudio.google.com/) (Gemini)
-
-## Estrutura do repositório
-
-```
-.
-├── backend/           # Flask – API /chat e servir dist em desenvolvimento
-├── frontend/          # React (Vite) – código-fonte e pasta dist após build
-├── teste/             # teste_modelos.py, teste_api_backend.py, load_test.js (k6)
-├── requirements.txt   # Dependências Python (raiz – CI e instalação)
-├── vercel.json        # Configuração de deploy
-├── .env.example       # Modelo de variáveis (sem segredos) — copie para `.env`
-├── .env               # Criar localmente (não versionar) – ver abaixo
-└── README.md
-```
-
-## Configuração da chave (`.env`)
-
-Copie o modelo e preencha a chave (nunca commite o `.env`):
-
-```bash
-cp .env.example .env
-```
-
-Edite `.env` na raiz:
-
-```env
-GEMINI_API_KEY=sua_chave_aqui
+```text
+EratoChat/
+├── backend/
+│   └── app.py
+├── frontend/
+│   ├── src/
+│   ├── index.html
+│   ├── package.json
+│   └── package-lock.json
+├── ml/
+│   ├── artefatos/
+│   │   ├── metricas_modelos.txt
+│   │   └── modelo_tipo_obra.joblib
+│   ├── RELATORIO_N2.docx
+│   └── treino_classificadores.py
+├── teste/
+│   ├── teste_api_backend.py
+│   ├── teste_modelos.py
+│   ├── load_test.js
+│   ├── verificar_insert_supabase.py
+│   └── disparar_requisicoes_e_verificar_supabase.py
+├── .env.example
+├── .env
+├── .gitignore
+├── README.md
+├── requirements.txt
+└── vercel.json
 ```
 
-O `.gitignore` ignora `.env`, arquivos `.env.*` (exceto `.env.example`), chaves `.pem`, caches e `frontend/dist/`.
+## Guia de Início Rápido
 
-## Segurança
+### 1) Pré-requisitos
 
-- **Chave Gemini**: só no servidor / variáveis de ambiente (Vercel: *Settings → Environment Variables*). O frontend **não** embute chaves; só chama a sua API.
-- **CORS**: por padrão aceita `localhost` / `127.0.0.1` nas portas do app e do Vite. Em produção, defina `CORS_ORIGINS` no `.env` com as URLs **HTTPS** do seu domínio (várias URLs separadas por vírgula).
-- **Erros**: em produção o backend não expõe detalhes internos da exceção; com `FLASK_DEBUG=1` os detalhes aparecem para depuração local.
-- **Cota Gemini**: quando a cota é excedida, o backend responde com mensagem clara orientando a tentar novamente ou ajustar plano/cota.
-- **Cabeçalhos HTTP**: `X-Content-Type-Options`, `X-Frame-Options` e `Referrer-Policy` são aplicados nas respostas.
-- **Markdown**: o React sanitiza o HTML com DOMPurify antes de exibir respostas da IA.
+- Python 3.10+ (3.12 recomendado)
+- Node.js 18+
+- Chave Gemini
+- (Opcional) Projeto Supabase para métricas
 
-## Instalação
-
-### 1. Clonar o repositório
+### 2) Instalação
 
 ```bash
 git clone https://github.com/Emilio467/CineChat.git
 cd CineChat
 ```
 
-### 2. Ambiente Python (recomendado: venv)
-
-**Windows (PowerShell):**
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-**Linux / macOS:**
+Ambiente Python:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+```
+
+Ativação:
+
+- Windows (PowerShell): `.\.venv\Scripts\Activate.ps1`
+- Windows (CMD): `.venv\Scripts\activate.bat`
+- Linux/macOS: `source .venv/bin/activate`
+
+Dependências:
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 3. Frontend – dependências e build
-
-O Flask serve os arquivos estáticos a partir de `frontend/dist`. É necessário gerar o build antes de rodar o servidor único (backend + SPA):
+Frontend:
 
 ```bash
 cd frontend
@@ -108,76 +100,202 @@ npm run build
 cd ..
 ```
 
-### 4. Testes automatizados (opcional)
+### 3) Configuração (`.env`)
 
-Com o venv ativo e na raiz do projeto:
+Se voce **ja tem** `.env`, mantenha o seu arquivo atual.
 
-```bash
-pip install pytest
-pytest teste/teste_api_backend.py
+Se voce **nao tem** `.env`, use o template:
+
+- Windows (CMD): `copy .env.example .env`
+- Linux/macOS: `cp .env.example .env`
+
+Depois, edite os valores obrigatorios no `.env`:
+
+```env
+GEMINI_API_KEY=COLE_SUA_CHAVE_AQUI
+GEMINI_MODEL=gemini-3-flash
+MAX_MESSAGE_CHARS=1200
+RATE_LIMIT_MAX_REQUESTS=25
+RATE_LIMIT_WINDOW_SECONDS=60
+APP_AUTH_TOKEN=
+CORS_ORIGINS=http://127.0.0.1:5001,http://localhost:5001,http://127.0.0.1:5173,http://localhost:5173
+SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_METRICS_TABLE=api_request_metrics
+FLASK_DEBUG=1
 ```
 
-Para testar listagem de modelos / conexão com a API (requer `GEMINI_API_KEY`):
+Observacao: o backend mostra instrucoes de setup apenas quando detecta que `.env` nao existe.
 
-```bash
-python teste/teste_modelos.py
-```
-
-Carga com **k6** (com o backend em `http://127.0.0.1:5001`):
-
-```bash
-k6 run teste/load_test.js
-```
-
-## Executar localmente
-
-Na raiz do projeto, com o build do frontend já feito e o `.env` configurado:
+### 4) Executar
 
 ```bash
 python backend/app.py
 ```
 
-- API: `POST http://127.0.0.1:5001/api/chat` (JSON: `message`, opcional `stream: true`)
-- Interface: abra no navegador `http://127.0.0.1:5001/`
+- API: `POST http://127.0.0.1:5001/api/chat`
+- App: `http://127.0.0.1:5001/`
 
-Exemplo de payload:
+## Documentação de Uso
+
+### Exemplo de requisição da API
+
+```bash
+curl -X POST "http://127.0.0.1:5001/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"message\":\"Me recomende 5 livros de fantasia\",\"stream\":false}"
+```
+
+Exemplo de resposta:
 
 ```json
 {
-  "message": "Me recomende 5 livros de fantasia para iniciantes",
-  "stream": true
+  "response": "## Livros\n\n**1. ...**\n..."
 }
 ```
 
-**Desenvolvimento só do frontend** (hot reload; a API continua no Flask na porta 5001):
+### Regras de negócio implementadas
+
+- Foco em filmes, séries e livros.
+- Se o usuário define quantidade, a API respeita.
+- Se não define, padrão de 20 recomendações.
+- Limite de tamanho de mensagem (`MAX_MESSAGE_CHARS`).
+- Rate limit por IP.
+
+### Segurança implementada
+
+- Chave Gemini somente no backend.
+- CORS configurável por ambiente.
+- Token opcional (`APP_AUTH_TOKEN`).
+- Cabeçalhos de segurança HTTP.
+- Sanitização de HTML no frontend via DOMPurify.
+
+## Classificação Supervisionada e Relatório
+
+O projeto inclui um módulo de ML para classificar o tipo de solicitação textual do usuário.
+
+### O que foi implementado
+
+- Separação treino/teste com `train_test_split`.
+- Treino de 3 classificadores:
+  - Logistic Regression
+  - Linear SVC
+  - Multinomial Naive Bayes
+- Matriz de confusão do melhor modelo.
+- Relatório em Word com atualização automática:
+  - `ml/RELATORIO_N2.docx`
+  - cópia em `Downloads/RELATORIO_N2.docx` ao executar o script.
+
+### Como executar
 
 ```bash
-cd frontend
-npm run dev
+python ml/treino_classificadores.py
 ```
 
-O app detecta `localhost` e envia requisições para `http://127.0.0.1:5001/api/chat`.
+Arquivos gerados:
 
-## Variáveis e portas
+- `ml/artefatos/modelo_tipo_obra.joblib`
+- `ml/artefatos/metricas_modelos.txt`
+- `ml/RELATORIO_N2.docx`
 
-| Variável | Obrigatória | Descrição |
-|----------|-------------|-----------|
-| `GEMINI_API_KEY` | Sim | Chave da API Gemini |
-| `GEMINI_MODEL` | Não | Modelo Gemini (padrão: `gemini-3-flash`) |
-| `MAX_MESSAGE_CHARS` | Não | Limite de caracteres por mensagem (padrão: `1200`) |
-| `RATE_LIMIT_MAX_REQUESTS` | Não | Requisições por janela por IP (padrão: `25`) |
-| `RATE_LIMIT_WINDOW_SECONDS` | Não | Janela do rate limit em segundos (padrão: `60`) |
-| `APP_AUTH_TOKEN` | Não | Se definido, exige `Authorization: Bearer <token>` ou `X-App-Token` |
+## Supabase (Métricas Reais da API)
 
-| Serviço | Porta padrão |
-|---------|----------------|
-| Flask (`backend/app.py`) | `5001` |
+Com `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY`, cada chamada ao `/api/chat` é registrada com status e tempo de resposta.
 
-## CI/CD
+### Criação da tabela
 
-O workflow em `.github/workflows/main.yml` instala dependências com `requirements.txt`, valida sintaxe de arquivos Python e executa `pytest` em `teste/teste_api_backend.py` em pushes e pull requests para `main` / `master`.
+```sql
+create table if not exists public.api_request_metrics (
+  id bigint generated always as identity primary key,
+  endpoint text not null default '/api/chat',
+  status_code integer not null,
+  response_time_ms integer not null,
+  message_length integer not null default 0,
+  is_stream boolean not null default false,
+  error_code text,
+  error_message text,
+  client_ip text,
+  created_at timestamp with time zone not null default now()
+);
+```
 
-## Deploy (Vercel)
+### Permissões mínimas (anon)
 
-O projeto inclui `vercel.json` para build do frontend e função Python. Configure o segredo **`GEMINI_API_KEY`** nas variáveis de ambiente do projeto na Vercel após conectar o repositório.
+```sql
+alter table public.api_request_metrics enable row level security;
+
+drop policy if exists "allow anon insert metrics" on public.api_request_metrics;
+drop policy if exists "allow anon select metrics" on public.api_request_metrics;
+
+create policy "allow anon insert metrics"
+on public.api_request_metrics
+for insert
+to anon
+with check (true);
+
+create policy "allow anon select metrics"
+on public.api_request_metrics
+for select
+to anon
+using (true);
+
+grant insert, select on public.api_request_metrics to anon;
+grant usage, select on sequence public.api_request_metrics_id_seq to anon;
+```
+
+## Testes
+
+```bash
+pytest teste/teste_api_backend.py
+```
+
+Utilitários de verificação:
+
+- `python teste/verificar_insert_supabase.py`
+- `python teste/disparar_requisicoes_e_verificar_supabase.py`
+
+## Deploy
+
+O projeto já está preparado para Vercel com:
+
+- função Python em `backend/app.py`
+- build estático do frontend
+- roteamento via `vercel.json`
+
+Configure as variáveis no painel da Vercel (principalmente `GEMINI_API_KEY` e variáveis de Supabase, se usadas em produção).
+
+## Guia de Contribuição
+
+1. Faça um fork do projeto.
+2. Crie uma branch de feature/correção.
+3. Implemente com commits pequenos e objetivos.
+4. Rode testes (`pytest`) antes de abrir PR.
+5. Descreva no PR:
+   - motivação da mudança,
+   - impacto esperado,
+   - como validar.
+
+### Boas práticas para contribuir
+
+- Não versionar segredos (`.env`, chaves, tokens).
+- Manter compatibilidade com fluxo local e Vercel.
+- Documentar qualquer nova variável de ambiente no `README.md`.
+
+## Informações de Contato
+
+### Autores
+
+- Emílio Gaspar — Desenvolvimento Backend
+- Jamili Gabriela — QA e Desenvolvimento
+- Dante Tucker — Análise de Dados
+- Wesley Albuquerque — Desenvolvimento Frontend
+- João Lira Baracho — Análise de Dados
+
+### Canais de ajuda
+
+- Abra uma issue no repositório para bugs e dúvidas técnicas.
+- Para suporte de execução local, inclua:
+  - sistema operacional,
+  - comando executado,
+  - erro completo exibido no terminal.
 
