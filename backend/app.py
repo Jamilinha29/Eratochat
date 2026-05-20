@@ -1,11 +1,12 @@
 import json
 import os
-from pathlib import Path
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
+from pathlib import Path
 
 import google.generativeai as genai
 from google.api_core import exceptions as google_exceptions
@@ -26,7 +27,7 @@ if not env_path.exists() and env_example_path.exists():
     print("[setup] Linux/macOS: cp .env.example .env")
 
 api_key = os.getenv("GEMINI_API_KEY", "").strip()
-gemini_model_name = (os.getenv("GEMINI_MODEL") or "gemini-3-flash").strip()
+gemini_model_name = (os.getenv("GEMINI_MODEL") or "gemini-3-flash-preview").strip()
 app_auth_token = os.getenv("APP_AUTH_TOKEN", "").strip()
 max_message_chars = int(os.getenv("MAX_MESSAGE_CHARS", "1200"))
 rate_limit_max_requests = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "25"))
@@ -34,6 +35,9 @@ rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 supabase_url = os.getenv("SUPABASE_URL", "").strip()
 supabase_publishable_key = (os.getenv("SUPABASE_PUBLISHABLE_KEY") or os.getenv("SUPABASE_KEY") or "").strip()
 supabase_table = (os.getenv("SUPABASE_METRICS_TABLE") or "api_request_metrics").strip()
+supabase_avatars_bucket = (os.getenv("SUPABASE_AVATARS_BUCKET") or "avatars").strip()
+supabase_avatars_table = (os.getenv("SUPABASE_AVATARS_TABLE") or "user_avatars").strip()
+max_avatar_bytes = int(os.getenv("MAX_AVATAR_BYTES", str(1024**3)))
 
 if os.getenv("FLASK_DEBUG") == "1":
     print("GEMINI_API_KEY configurada:", bool(api_key))
@@ -217,6 +221,131 @@ def _safe_text(value, max_len=240):
     return text[:max_len]
 
 
+def _format_size_limit(num_bytes):
+    size = int(num_bytes)
+    gb = size / (1024**3)
+    if gb >= 1:
+        label = f"{gb:.1f}".rstrip("0").rstrip(".")
+        return f"{label} GB"
+    mb = size / (1024**2)
+    if mb >= 1:
+        return f"{int(mb)} MB"
+    return f"{int(size / 1024)} KB"
+
+
+def _supabase_enabled():
+    return bool(supabase_url and supabase_publishable_key)
+
+
+def _supabase_headers(extra=None):
+    headers = {
+        "apikey": supabase_publishable_key,
+        "Authorization": f"Bearer {supabase_publishable_key}",
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def _supabase_request(method, path, *, data=None, raw_body=None, headers_extra=None, timeout=15):
+    if not _supabase_enabled():
+        raise RuntimeError("Supabase não configurado.")
+
+    url = f"{supabase_url.rstrip('/')}/{path.lstrip('/')}"
+    headers = _supabase_headers(headers_extra)
+    body = raw_body
+    if data is not None:
+        headers.setdefault("Content-Type", "application/json")
+        body = json.dumps(data).encode("utf-8")
+
+    req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read()
+            if not raw:
+                return response.status, None
+            try:
+                return response.status, json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                return response.status, raw.decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Supabase HTTP {exc.code}: {detail}") from exc
+
+
+def _valid_client_id(client_id):
+    text = str(client_id or "").strip()
+    if not text or len(text) > 64:
+        return False
+    return bool(re.fullmatch(r"[a-zA-Z0-9_-]+", text))
+
+
+def _avatar_extension(content_type, filename):
+    mapping = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif",
+    }
+    ext = mapping.get((content_type or "").lower().split(";")[0].strip())
+    if ext:
+        return ext
+    name = (filename or "").lower()
+    if "." in name:
+        candidate = name.rsplit(".", 1)[-1]
+        if candidate in {"jpg", "jpeg", "png", "webp", "gif"}:
+            return "jpg" if candidate == "jpeg" else candidate
+    return "jpg"
+
+
+def _avatar_public_url(storage_path):
+    encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+    return f"{supabase_url.rstrip('/')}/storage/v1/object/public/{supabase_avatars_bucket}/{encoded}"
+
+
+def _get_avatar_record(client_id):
+    query = urllib.parse.urlencode(
+        {"client_id": f"eq.{client_id}", "select": "client_id,storage_path,public_url,content_type,updated_at"}
+    )
+    _, payload = _supabase_request("GET", f"rest/v1/{supabase_avatars_table}?{query}")
+    if isinstance(payload, list) and payload:
+        return payload[0]
+    return None
+
+
+def _delete_storage_object(storage_path):
+    if not storage_path:
+        return
+    encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+    try:
+        _supabase_request("DELETE", f"storage/v1/object/{supabase_avatars_bucket}/{encoded}")
+    except RuntimeError:
+        # Objeto já removido ou inexistente — segue o fluxo.
+        return
+
+
+def _delete_avatar_record(client_id):
+    query = urllib.parse.urlencode({"client_id": f"eq.{client_id}"})
+    _supabase_request("DELETE", f"rest/v1/{supabase_avatars_table}?{query}")
+
+
+def _upsert_avatar_record(client_id, storage_path, public_url, content_type):
+    row = {
+        "client_id": client_id,
+        "storage_path": storage_path,
+        "public_url": public_url,
+        "content_type": content_type,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    _supabase_request(
+        "POST",
+        f"rest/v1/{supabase_avatars_table}",
+        data=row,
+        headers_extra={"Prefer": "resolution=merge-duplicates,return=representation"},
+    )
+
+
 def _log_metric(status_code, elapsed_ms, message, is_stream=False, error_code="", error_message=""):
     """
     Envia métricas da requisição para o Supabase via REST (opcional).
@@ -269,7 +398,7 @@ def security_headers(response):
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data:; "
+        "img-src 'self' data: https:; "
         "connect-src 'self' http://127.0.0.1:5001 http://localhost:5001 https:; "
         "frame-ancestors 'self'"
     )
@@ -352,6 +481,98 @@ def chat_agente():
         detail = _expose_internal_error(e)
         _log_metric(500, elapsed_ms(), msg_usuario, is_stream=False, error_code="internal_exception", error_message=str(e))
         return jsonify({"response": f"O projetor parou! (Erro: {detail})"}), 500
+
+
+@app.route("/api/avatar", methods=["GET"])
+def get_avatar():
+    if not _is_authorized():
+        return jsonify({"error": "Não autorizado"}), 401
+    if not _supabase_enabled():
+        return jsonify({"error": "Supabase não configurado."}), 503
+
+    client_id = request.args.get("client_id", "").strip()
+    if not _valid_client_id(client_id):
+        return jsonify({"error": "client_id inválido."}), 400
+
+    try:
+        record = _get_avatar_record(client_id)
+        if not record:
+            return jsonify({"avatar_url": None})
+        return jsonify({"avatar_url": record.get("public_url")})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/avatar", methods=["POST"])
+def upload_avatar():
+    if not _is_authorized():
+        return jsonify({"error": "Não autorizado"}), 401
+    if not _supabase_enabled():
+        return jsonify({"error": "Supabase não configurado."}), 503
+
+    client_id = (request.form.get("client_id") or "").strip()
+    if not _valid_client_id(client_id):
+        return jsonify({"error": "client_id inválido."}), 400
+
+    upload = request.files.get("avatar")
+    if not upload or not upload.filename:
+        return jsonify({"error": "Arquivo de imagem não enviado."}), 400
+
+    content_type = (upload.mimetype or "").lower()
+    if not content_type.startswith("image/"):
+        return jsonify({"error": "Envie um arquivo de imagem válido."}), 400
+
+    raw = upload.read()
+    if not raw:
+        return jsonify({"error": "Arquivo vazio."}), 400
+    if len(raw) > max_avatar_bytes:
+        return jsonify({"error": f"Imagem muito grande. Limite: {_format_size_limit(max_avatar_bytes)}."}), 413
+
+    ext = _avatar_extension(content_type, upload.filename)
+    storage_path = f"{client_id}/avatar.{ext}"
+
+    try:
+        existing = _get_avatar_record(client_id)
+        if existing and existing.get("storage_path") and existing["storage_path"] != storage_path:
+            _delete_storage_object(existing["storage_path"])
+
+        encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+        _supabase_request(
+            "POST",
+            f"storage/v1/object/{supabase_avatars_bucket}/{encoded}",
+            raw_body=raw,
+            headers_extra={
+                "Content-Type": content_type,
+                "x-upsert": "true",
+            },
+        )
+
+        public_url = _avatar_public_url(storage_path)
+        _upsert_avatar_record(client_id, storage_path, public_url, content_type)
+        return jsonify({"avatar_url": public_url, "storage_path": storage_path})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/avatar", methods=["DELETE"])
+def delete_avatar():
+    if not _is_authorized():
+        return jsonify({"error": "Não autorizado"}), 401
+    if not _supabase_enabled():
+        return jsonify({"error": "Supabase não configurado."}), 503
+
+    client_id = request.args.get("client_id", "").strip()
+    if not _valid_client_id(client_id):
+        return jsonify({"error": "client_id inválido."}), 400
+
+    try:
+        existing = _get_avatar_record(client_id)
+        if existing and existing.get("storage_path"):
+            _delete_storage_object(existing["storage_path"])
+        _delete_avatar_record(client_id)
+        return jsonify({"ok": True})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
 
 
 @app.route("/")

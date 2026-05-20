@@ -8,8 +8,12 @@
   --bg-input: #161b36;
   --bg-modal: #131933;
   --bg-card: #151a30;
-  --bg-message-user: transparent;
-  --bg-message-ai: transparent;
+  --bg-message-user: #1e2540;
+  --bg-message-ai: rgba(88, 56, 180, 0.22);
+  --border-message-user: rgba(255, 255, 255, 0.08);
+  --border-message-ai: rgba(167, 139, 250, 0.35);
+  --accent-message-ai: #a78bfa;
+  --shadow-message-ai: rgba(88, 28, 135, 0.15);
   
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
@@ -45,8 +49,12 @@
   --bg-input: #18181b;
   --bg-modal: #0f0f11;
   --bg-card: #111113;
-  --bg-message-user: transparent;
-  --bg-message-ai: transparent;
+  --bg-message-user: #18181b;
+  --bg-message-ai: rgba(76, 61, 120, 0.28);
+  --border-message-user: #27272a;
+  --border-message-ai: rgba(129, 112, 180, 0.4);
+  --accent-message-ai: #a78bfa;
+  --shadow-message-ai: rgba(0, 0, 0, 0.35);
   
   --text-main: #e2e8f0;
   --text-muted: #71717a;
@@ -73,8 +81,12 @@
   --bg-input: #e3eaf4;
   --bg-modal: #e9eef6;
   --bg-card: #dde6f2;
-  --bg-message-user: transparent;
-  --bg-message-ai: transparent;
+  --bg-message-user: #dde6f2;
+  --bg-message-ai: rgba(237, 233, 254, 0.95);
+  --border-message-user: #c7d2e3;
+  --border-message-ai: rgba(139, 92, 246, 0.35);
+  --accent-message-ai: #7c3aed;
+  --shadow-message-ai: rgba(124, 58, 237, 0.08);
   
   --text-main: #111827;
   --text-muted: #475569;
@@ -101,8 +113,12 @@
   --bg-input: #17112e;
   --bg-modal: #130f28;
   --bg-card: #15102a;
-  --bg-message-user: transparent;
-  --bg-message-ai: transparent;
+  --bg-message-user: #1e173e;
+  --bg-message-ai: rgba(109, 40, 217, 0.2);
+  --border-message-user: rgba(139, 92, 246, 0.2);
+  --border-message-ai: rgba(192, 132, 252, 0.45);
+  --accent-message-ai: #c084fc;
+  --shadow-message-ai: rgba(109, 40, 217, 0.25);
   
   --text-main: #f1f5f9;
   --text-muted: #a78bfa;
@@ -581,17 +597,38 @@ body {
 }
 
 .message-row.user .message-text {
-  background-color: var(--bg-card);
+  background-color: var(--bg-message-user);
   padding: 12px 16px;
   border-radius: 18px 18px 4px 18px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-message-user);
 }
 
-/* Markdown Styles in AI Messages */
+/* Balão da IA — estilo conversa (largo, roxo/violeta por tema) */
+.message-row.assistant .message-bubble {
+  max-width: calc(100% - 48px);
+  flex: 1;
+  min-width: 0;
+}
+
+.message-row.assistant .author-name {
+  color: var(--accent-message-ai);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
 .message-row.assistant .message-text {
   color: var(--text-main);
   text-align: left;
+  background: var(--bg-message-ai);
+  border: 1px solid var(--border-message-ai);
+  border-left: 3px solid var(--accent-message-ai);
+  border-radius: 4px 18px 18px 18px;
+  padding: 14px 18px;
+  box-shadow: 0 2px 12px var(--shadow-message-ai);
+  width: 100%;
 }
+
+/* Markdown Styles in AI Messages */
 
 .message-row.assistant .message-text p {
   margin-bottom: 12px;
@@ -628,6 +665,177 @@ body {
 .message-row.assistant .message-text strong {
   color: var(--text-main);
   font-weight: 600;
+}
+
+.message-row.assistant .message-text em {
+  color: var(--accent-message-ai);
+}
+
+/* Configurações — avatar do usuário */
+.avatar-profile-preview {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-message-ai);
+  background: var(--bg-card);
+}
+
+.avatar-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.avatar-upload-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-avatar-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-input);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-avatar-upload:hover {
+  background: var(--bg-card);
+  border-color: var(--accent-message-ai);
+}
+
+.btn-avatar-upload.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.btn-avatar-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.btn-avatar-remove:hover {
+  color: var(--danger-color);
+}
+
+.avatar.user-avatar img.avatar-profile-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Modal de recorte circular do avatar */
+.avatar-crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.avatar-crop-modal {
+  width: min(100%, 420px);
+  background: var(--bg-modal);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+.avatar-crop-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.avatar-crop-header p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.45;
+}
+
+.avatar-crop-stage {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.avatar-crop-zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--text-muted);
+}
+
+.avatar-crop-zoom input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent-message-ai, var(--accent-color));
+}
+
+.avatar-crop-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.btn-crop-cancel,
+.btn-crop-confirm {
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border-input);
+}
+
+.btn-crop-cancel {
+  background: transparent;
+  color: var(--text-main);
+}
+
+.btn-crop-cancel:hover {
+  background: var(--bg-card);
+}
+
+.btn-crop-confirm {
+  background: var(--accent-color);
+  color: #fff;
+  border-color: transparent;
+}
+
+.btn-crop-confirm:hover:not(:disabled) {
+  background: var(--accent-color-hover);
+}
+
+.btn-crop-cancel:disabled,
+.btn-crop-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .message-row.assistant .message-text hr {

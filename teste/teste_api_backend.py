@@ -19,8 +19,10 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def clear_rate_limit_bucket():
+def clear_rate_limit_bucket(monkeypatch):
     _ip_hits.clear()
+    # Evita 401 quando o .env local define APP_AUTH_TOKEN (testes não enviam header).
+    monkeypatch.setattr("backend.app.app_auth_token", "")
 
 def test_api_chat_sem_mensagem(client):
     """Testa se a API retorna erro 400 (Bad Request) quando a mensagem não é enviada."""

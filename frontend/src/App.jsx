@@ -1,6 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import AvatarCropModal from './AvatarCropModal';
+import { readFileAsDataUrl } from './avatarCrop';
+
+const CLIENT_ID_KEY = "erato_client_id";
+
+function getApiBase() {
+  if (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
+    return "http://127.0.0.1:5001";
+  }
+  return "";
+}
+
+function getClientId() {
+  let id = localStorage.getItem(CLIENT_ID_KEY);
+  if (!id) {
+    id = `cid_${crypto.randomUUID().replace(/-/g, "")}`;
+    localStorage.setItem(CLIENT_ID_KEY, id);
+  }
+  return id;
+}
+
+function buildApiHeaders(json = false) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  const token = (import.meta.env.VITE_APP_AUTH_TOKEN || "").trim();
+  if (token) headers["X-App-Token"] = token;
+  return headers;
+}
+
+function formatAvatarLimit(bytes) {
+  const size = Number(bytes) || 0;
+  const gb = size / (1024 ** 3);
+  if (gb >= 1) {
+    const label = gb.toFixed(1).replace(/\.0$/, "");
+    return `${label} GB`;
+  }
+  const mb = size / (1024 ** 2);
+  if (mb >= 1) return `${Math.round(mb)} MB`;
+  return `${Math.round(size / 1024)} KB`;
+}
 
 function App() {
   const logo = "/logo.png";
@@ -38,9 +78,17 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingChatId, setLoadingChatId] = useState(null);
   const [openDropdownId, setOpenDropdownId] = useState(null);
+  const [userAvatar, setUserAvatar] = useState("");
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState(null);
+  const clientIdRef = useRef(getClientId());
+  const MAX_SOURCE_IMAGE_BYTES = 15 * 1024 * 1024;
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const avatarInputRef = useRef(null);
+  const MAX_AVATAR_BYTES = Number(import.meta.env.VITE_MAX_AVATAR_BYTES) || 1024 * 1024 * 1024;
+  const maxAvatarLabel = formatAvatarLimit(MAX_AVATAR_BYTES);
   /** Evita envio duplo (duplo clique / cartão + Enter) enquanto a requisição está ativa */
   const sendInFlightRef = useRef(false);
   const MAX_INPUT_CHARS = 1200;
@@ -92,6 +140,46 @@ function App() {
     const closeDropdown = () => setOpenDropdownId(null);
     document.addEventListener('click', closeDropdown);
     return () => document.removeEventListener('click', closeDropdown);
+  }, []);
+
+  const fetchAvatarFromServer = async () => {
+    const clientId = clientIdRef.current;
+    const res = await fetch(
+      `${getApiBase()}/api/avatar?client_id=${encodeURIComponent(clientId)}`,
+      { headers: buildApiHeaders() }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Erro ${res.status}`);
+    }
+    return data.avatar_url || "";
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAvatar = async () => {
+      setAvatarBusy(true);
+      try {
+        const legacy = localStorage.getItem("user_avatar");
+        if (legacy && legacy.startsWith("data:image")) {
+          if (!cancelled) setCropImageSrc(legacy);
+          return;
+        }
+
+        const url = await fetchAvatarFromServer();
+        if (!cancelled) setUserAvatar(url);
+      } catch {
+        if (!cancelled) setUserAvatar("");
+      } finally {
+        if (!cancelled) setAvatarBusy(false);
+      }
+    };
+
+    loadAvatar();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const createNewChat = () => {
@@ -240,15 +328,13 @@ function App() {
       return newChats;
     });
 
-    const apiUrl =
-      window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"
-        ? "http://127.0.0.1:5001/api/chat"
-        : "/api/chat";
+    const apiUrl = `${getApiBase()}/api/chat`;
+    const apiHeaders = buildApiHeaders(true);
 
     try {
       const response = await fetch(apiUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: apiHeaders,
         body: JSON.stringify({ message: textToSend, stream: true }),
       });
 
@@ -384,6 +470,94 @@ function App() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const uploadAvatarBlob = async (blob) => {
+    const file = new File([blob], "avatar.jpg", { type: blob.type || "image/jpeg" });
+    const form = new FormData();
+    form.append("client_id", clientIdRef.current);
+    form.append("avatar", file);
+
+    setAvatarBusy(true);
+    try {
+      const res = await fetch(`${getApiBase()}/api/avatar`, {
+        method: "POST",
+        headers: buildApiHeaders(),
+        body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Erro ${res.status}`);
+      }
+      setUserAvatar(data.avatar_url || "");
+      localStorage.removeItem("user_avatar");
+      setCropImageSrc(null);
+    } catch (err) {
+      alert(err.message || "Não foi possível salvar a foto no servidor.");
+      throw err;
+    } finally {
+      setAvatarBusy(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const handleAvatarFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Selecione um arquivo de imagem (PNG, JPG, WEBP, etc.).");
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+      return;
+    }
+    if (file.size > MAX_SOURCE_IMAGE_BYTES) {
+      alert("Imagem muito grande para abrir no recorte. Use um arquivo de até 15 MB.");
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setCropImageSrc(dataUrl);
+    } catch (err) {
+      alert(err.message || "Não foi possível abrir a imagem.");
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const handleCropConfirm = async (blob) => {
+    await uploadAvatarBlob(blob);
+  };
+
+  const handleCropCancel = () => {
+    setCropImageSrc(null);
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
+  };
+
+  const removeUserAvatar = async () => {
+    setAvatarBusy(true);
+    try {
+      const res = await fetch(
+        `${getApiBase()}/api/avatar?client_id=${encodeURIComponent(clientIdRef.current)}`,
+        { method: "DELETE", headers: buildApiHeaders() }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Erro ${res.status}`);
+      }
+      setUserAvatar("");
+      localStorage.removeItem("user_avatar");
+    } catch (err) {
+      alert(err.message || "Não foi possível remover a foto.");
+    } finally {
+      setAvatarBusy(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  };
+
+  const renderUserAvatar = () => {
+    if (userAvatar) {
+      return <img src={userAvatar} alt="Seu avatar" className="avatar-profile-img" />;
+    }
+    return <span className="material-symbols-rounded" style={{ fontSize: "20px" }}>person</span>;
   };
 
   const handleQuickPrompt = (prompt, sendDirect = false) => {
@@ -530,9 +704,7 @@ function App() {
                 return (
                   <div key={idx} className={`message-row ${msg.type}`}>
                     <div className={`avatar ${isUser ? 'user-avatar' : 'ai-avatar'}`}>
-                      {isUser ? (
-                        <span className="material-symbols-rounded" style={{fontSize: '20px'}}>person</span>
-                      ) : (
+                      {isUser ? renderUserAvatar() : (
                         <img src={logo} alt="Logo EratoChat" className="avatar-logo" />
                       )}
                     </div>
@@ -641,6 +813,43 @@ function App() {
 
             <div className="config-secao">
               <label className="config-label">
+                <span className="material-symbols-rounded">account_circle</span> Foto de perfil
+              </label>
+              <div className="avatar-upload-row">
+                {userAvatar ? (
+                  <img src={userAvatar} alt="Prévia do avatar" className="avatar-profile-preview" />
+                ) : (
+                  <div className="avatar user-avatar" style={{ width: 72, height: 72 }}>
+                    <span className="material-symbols-rounded" style={{ fontSize: 36 }}>person</span>
+                  </div>
+                )}
+                <div className="avatar-upload-actions">
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarFileSelect}
+                    style={{ display: "none" }}
+                    id="user-avatar-input"
+                  />
+                  <label htmlFor="user-avatar-input" className={`btn-avatar-upload ${avatarBusy ? "disabled" : ""}`}>
+                    <span className="material-symbols-rounded">upload</span>
+                    {avatarBusy ? "Salvando..." : "Escolher imagem"}
+                  </label>
+                  {userAvatar && (
+                    <button type="button" className="btn-avatar-remove" onClick={removeUserAvatar} disabled={avatarBusy}>
+                      Remover foto
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="config-hint">
+                Ao escolher a imagem, abra o recorte circular, ajuste o zoom e confirme. A foto é otimizada antes de salvar no Supabase.
+              </p>
+            </div>
+
+            <div className="config-secao">
+              <label className="config-label">
                 <span className="material-symbols-rounded">smart_toy</span> Nome do Agente
               </label>
               <div className="input-group">
@@ -669,6 +878,14 @@ function App() {
           </div>
         </div>
       </div>
+
+      {cropImageSrc && (
+        <AvatarCropModal
+          imageSrc={cropImageSrc}
+          onCancel={handleCropCancel}
+          onConfirm={handleCropConfirm}
+        />
+      )}
     </div>
   );
 }
