@@ -89,7 +89,7 @@ if api_key:
 ### TOM:
 Prestativo e objetivo; use linguagem clara com um toque técnico (termos como narrativa, direção, ritmo, fotografia, desenvolvimento de personagens quando fizer sentido), sem exagerar no jargão. Emojis com moderação."""
 
-    _gen_cfg = genai.GenerationConfig(max_output_tokens=16384, temperature=0.85)
+    _gen_cfg = genai.GenerationConfig(max_output_tokens=4096, temperature=0.85)
     model = genai.GenerativeModel(
         model_name=gemini_model_name,
         system_instruction=SYSTEM_PROMPT,
@@ -175,6 +175,51 @@ def _enforce_recommendation_count(raw_text, requested_count):
     if prefix:
         return f"{prefix}\n\n{kept}".strip()
     return kept.strip()
+
+
+def _generate_with_retry(prompt, max_retries=2):
+    """Chama Gemini com retry e backoff exponencial para erros transitórios."""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = model.generate_content(prompt, stream=False)
+            return response
+        except google_exceptions.ResourceExhausted:
+            raise
+        except (google_exceptions.ServiceUnavailable, google_exceptions.DeadlineExceeded, google_exceptions.InternalServerError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) * 0.5)
+                continue
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) * 0.5)
+                continue
+            raise last_exc
+
+
+def _generate_stream_with_retry(prompt, max_retries=2):
+    """Streaming real do Gemini com retry na conexão inicial."""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return model.generate_content(prompt, stream=True)
+        except google_exceptions.ResourceExhausted:
+            raise
+        except (google_exceptions.ServiceUnavailable, google_exceptions.DeadlineExceeded, google_exceptions.InternalServerError) as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) * 0.5)
+                continue
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) * 0.5)
+                continue
+            raise last_exc
 
 
 def _chunk_for_sse(text, chunk_size=420):
@@ -413,6 +458,36 @@ def security_headers(response):
     return response
 
 
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    """Diagnóstico rápido: verifica se os serviços dependentes estão acessíveis."""
+    status = {
+        "status": "ok",
+        "gemini_configured": bool(api_key and model),
+        "supabase_configured": _supabase_enabled(),
+        "auth_enabled": bool(app_auth_token),
+        "rate_limit": f"{rate_limit_max_requests} req / {rate_limit_window_seconds}s",
+    }
+
+    if not api_key or not model:
+        status["status"] = "degraded"
+        status["warning"] = "GEMINI_API_KEY ausente ou modelo não inicializado."
+
+    if _supabase_enabled():
+        try:
+            _supabase_request("GET", f"rest/v1/{supabase_table}?select=id&limit=1", timeout=5)
+        except Exception as exc:
+            status["supabase_reachable"] = False
+            status["supabase_error"] = str(exc)[:120]
+            if "401" not in str(exc) and "404" not in str(exc):
+                status["status"] = "degraded"
+        else:
+            status["supabase_reachable"] = True
+
+    http_code = 200 if status["status"] == "ok" else 503
+    return jsonify(status), http_code
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat_agente():
     started_at = time.perf_counter()
@@ -455,13 +530,11 @@ def chat_agente():
     if use_stream:
         def sse_chunks():
             try:
-                response = model.generate_content(
-                    _build_prompt_for_request(msg_usuario),
-                    stream=False,
-                )
-                final_text = _enforce_recommendation_count(response.text or "", requested_count)
-                for delta in _chunk_for_sse(final_text):
-                    yield f"data: {json.dumps({'text': delta}, ensure_ascii=False)}\n\n"
+                stream_response = _generate_stream_with_retry(_build_prompt_for_request(msg_usuario))
+                for chunk in stream_response:
+                    text_part = chunk.text if hasattr(chunk, "text") else ""
+                    if text_part:
+                        yield f"data: {json.dumps({'text': text_part}, ensure_ascii=False)}\n\n"
                 _log_metric(200, elapsed_ms(), msg_usuario, is_stream=True)
                 yield f"data: {json.dumps({'done': True})}\n\n"
             except google_exceptions.ResourceExhausted:
@@ -478,7 +551,7 @@ def chat_agente():
         )
 
     try:
-        response = model.generate_content(_build_prompt_for_request(msg_usuario), stream=False)
+        response = _generate_with_retry(_build_prompt_for_request(msg_usuario))
         final_text = _enforce_recommendation_count(response.text or "", requested_count)
         _log_metric(200, elapsed_ms(), msg_usuario, is_stream=False)
         return jsonify({"response": final_text})

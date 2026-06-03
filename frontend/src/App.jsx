@@ -8,7 +8,7 @@ const CLIENT_ID_KEY = "erato_client_id";
 
 function getApiBase() {
   if (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
-    return "http://127.0.0.1:5001";
+    return "";
   }
   return import.meta.env.VITE_API_BASE || "";
 }
@@ -28,6 +28,45 @@ function buildApiHeaders(json = false) {
   const token = (import.meta.env.VITE_APP_AUTH_TOKEN || "").trim();
   if (token) headers["X-App-Token"] = token;
   return headers;
+}
+
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_RETRIES = 3;
+
+async function fetchWithRetry(url, options, { maxRetries = MAX_RETRIES, isStream = false } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      if (response.ok || !RETRYABLE_STATUS.has(response.status)) {
+        return response;
+      }
+
+      if (response.status === 429) {
+        const data = await response.clone().json().catch(() => ({}));
+        const waitSec = data.retry_after_seconds || (2 ** attempt);
+        await new Promise((r) => setTimeout(r, waitSec * 1000));
+        lastError = new Error(data.error || `Erro ${response.status}`);
+        continue;
+      }
+
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, (2 ** attempt) * 1000));
+        lastError = new Error(`Erro ${response.status}`);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, (2 ** attempt) * 1000));
+        continue;
+      }
+    }
+  }
+  throw lastError || new Error("Falha na conexão após múltiplas tentativas.");
 }
 
 function formatAvatarLimit(bytes) {
@@ -144,9 +183,10 @@ function App() {
 
   const fetchAvatarFromServer = async () => {
     const clientId = clientIdRef.current;
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `${getApiBase()}/api/avatar?client_id=${encodeURIComponent(clientId)}`,
-      { headers: buildApiHeaders() }
+      { headers: buildApiHeaders() },
+      { maxRetries: 2 }
     );
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -270,8 +310,8 @@ function App() {
           }
         }
 
-        // Remove asterisco órfão no fim de linha (ex.: "... irresistível.*")
-        b = b.replace(/(?<!\*)\*(?!\*)(?=\s*$)/gm, "");
+        // Remove asteriscos órfãos no fim de linha (ex.: "... irresistível.*" ou "**")
+        b = b.replace(/\*{1,3}\s*$/gm, "");
 
         return b.trim();
       });
@@ -283,9 +323,12 @@ function App() {
         .replace(/^\s*(\d{1,2})\.\s+\1\.\s+/m, "$1. ")
         .replace(/([^\n])\s+(\*\*Por que vai gostar:\*\*)/gi, "$1\n\n$2")
         .replace(/\n{3,}/g, "\n\n")
-        // Remove asterisco órfão no fim de linha (ex.: "... irresistível.*")
-        .replace(/(?<!\*)\*(?!\*)(?=\s*$)/gm, "");
+        // Remove asteriscos órfãos no fim de linha
+        .replace(/\*{1,3}\s*$/gm, "");
     }
+
+    // Remove asteriscos soltos no final absoluto do texto
+    text = text.replace(/\s*\*{1,3}\s*$/, "");
 
     return text.trim();
   };
@@ -332,17 +375,25 @@ function App() {
     const apiHeaders = buildApiHeaders(true);
 
     try {
-      const response = await fetch(apiUrl, {
+      const response = await fetchWithRetry(apiUrl, {
         method: "POST",
         headers: apiHeaders,
         body: JSON.stringify({ message: textToSend, stream: true }),
-      });
+      }, { isStream: true });
 
       const ct = response.headers.get("content-type") || "";
 
       if (!response.ok && !ct.includes("text/event-stream")) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.response || errData.error || `Erro ${response.status}`);
+        const status = response.status;
+        let userMsg = errData.response || errData.error || "";
+        if (!userMsg) {
+          if (status === 401) userMsg = "Token de autenticação inválido. Verifique VITE_APP_AUTH_TOKEN.";
+          else if (status === 429) userMsg = "Limite de requisições atingido. Aguarde e tente novamente.";
+          else if (status === 503) userMsg = "Serviço de IA indisponível. Verifique se GEMINI_API_KEY está configurada.";
+          else userMsg = `Erro do servidor (${status}). Tente novamente em instantes.`;
+        }
+        throw new Error(userMsg);
       }
 
       if (!response.body) {
@@ -438,6 +489,10 @@ function App() {
         return newChats;
       });
     } catch (error) {
+      const isNetwork = error.name === "TypeError" || error.message?.includes("fetch");
+      const fallbackMsg = isNetwork
+        ? "Sem conexão com o servidor. Verifique se o backend está rodando (porta 5001) e tente novamente."
+        : error.message || "Erro inesperado. Tente novamente em alguns instantes.";
       setChats((prevChats) => {
         const newChats = prevChats.map((chat) => {
           if (chat.id !== currentChatId) return chat;
@@ -446,12 +501,7 @@ function App() {
             ...chat,
             messages: [
               ...withoutStreaming,
-              {
-                text:
-                  error.message ||
-                  "Erro de conexão. Verifique se o servidor está rodando.",
-                type: "assistant",
-              },
+              { text: fallbackMsg, type: "assistant" },
             ],
           };
         });
@@ -480,11 +530,11 @@ function App() {
 
     setAvatarBusy(true);
     try {
-      const res = await fetch(`${getApiBase()}/api/avatar`, {
+      const res = await fetchWithRetry(`${getApiBase()}/api/avatar`, {
         method: "POST",
         headers: buildApiHeaders(),
         body: form,
-      });
+      }, { maxRetries: 2 });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || `Erro ${res.status}`);
@@ -535,9 +585,10 @@ function App() {
   const removeUserAvatar = async () => {
     setAvatarBusy(true);
     try {
-      const res = await fetch(
+      const res = await fetchWithRetry(
         `${getApiBase()}/api/avatar?client_id=${encodeURIComponent(clientIdRef.current)}`,
-        { method: "DELETE", headers: buildApiHeaders() }
+        { method: "DELETE", headers: buildApiHeaders() },
+        { maxRetries: 2 }
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

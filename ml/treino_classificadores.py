@@ -216,13 +216,16 @@ def avaliar_api_real(amostras: int = 6) -> MetricasApi:
     erros = 0
     backend_app_module._ip_hits.clear()
 
+    auth_token = os.getenv("APP_AUTH_TOKEN", "").strip()
+    headers = {"X-App-Token": auth_token} if auth_token else {}
+
     original_testing = backend_app_module.app.config.get("TESTING", False)
     backend_app_module.app.config["TESTING"] = False
     try:
         with backend_app_module.app.test_client() as client:
             for msg in mensagens:
                 inicio = time.perf_counter()
-                resposta = client.post("/api/chat", json={"message": msg, "stream": False})
+                resposta = client.post("/api/chat", json={"message": msg, "stream": False}, headers=headers)
                 fim = time.perf_counter()
                 tempos.append(fim - inicio)
                 if resposta.status_code >= 400:
