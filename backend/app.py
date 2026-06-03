@@ -54,7 +54,15 @@ _default_origins = [
     "http://localhost:5173",
 ]
 _cors_raw = os.getenv("CORS_ORIGINS", "").strip()
-cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()] if _cors_raw else _default_origins
+if _cors_raw:
+    cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+else:
+    # Por padrão, permite localhost e qualquer subdomínio do vercel.app / onrender.com
+    import re
+    cors_origins = _default_origins + [
+        re.compile(r"^https://.*\.vercel\.app$"),
+        re.compile(r"^https://.*\.onrender\.com$")
+    ]
 CORS(app, origins=cors_origins, supports_credentials=False)
 
 model = None
