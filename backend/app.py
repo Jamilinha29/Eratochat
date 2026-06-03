@@ -18,7 +18,7 @@ project_root = Path(__file__).resolve().parents[1]
 env_path = project_root / ".env"
 env_example_path = project_root / ".env.example"
 
-load_dotenv(find_dotenv())
+load_dotenv(find_dotenv(), override=True)
 
 if not env_path.exists() and env_example_path.exists():
     print("[setup] Arquivo .env nao encontrado.")
@@ -26,7 +26,7 @@ if not env_path.exists() and env_example_path.exists():
     print("[setup] Windows CMD: copy .env.example .env")
     print("[setup] Linux/macOS: cp .env.example .env")
 
-api_key = os.getenv("GEMINI_API_KEY", "").strip()
+api_key = os.getenv("GEMINI_API_KEY", "").strip().strip("'\"")
 gemini_model_name = (os.getenv("GEMINI_MODEL") or "gemini-3-flash-preview").strip()
 app_auth_token = os.getenv("APP_AUTH_TOKEN", "").strip()
 max_message_chars = int(os.getenv("MAX_MESSAGE_CHARS", "1200"))
@@ -587,4 +587,5 @@ def static_files(path):
 
 if __name__ == "__main__":
     debug = os.getenv("FLASK_DEBUG") == "1"
-    app.run(debug=debug, port=5001)
+    port = int(os.getenv("PORT", 5001))
+    app.run(host="0.0.0.0", debug=debug, port=port)

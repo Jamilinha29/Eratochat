@@ -2,9 +2,9 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv())  # Busca o .env na raiz do projeto de forma inteligente
+load_dotenv(find_dotenv(), override=True)  # Busca o .env na raiz do projeto de forma inteligente
 
-CHAVE_API = os.getenv("GEMINI_API_KEY")
+CHAVE_API = os.getenv("GEMINI_API_KEY", "").strip().strip("'\"")
 
 if not CHAVE_API:
     print("ERRO: Variável GEMINI_API_KEY não encontrada no .env")

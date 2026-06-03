@@ -5,3 +5,4 @@ python-dotenv==1.0.1
 scikit-learn
 joblib
 python-docx
+gunicorn==22.0.0
