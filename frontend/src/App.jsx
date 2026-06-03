@@ -10,7 +10,7 @@ function getApiBase() {
   if (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
     return "http://127.0.0.1:5001";
   }
-  return "";
+  return import.meta.env.VITE_API_BASE || "";
 }
 
 function getClientId() {
